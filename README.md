@@ -1,6 +1,6 @@
 # mellymell
 
-An open-source pitch detection tool inspired by NoteGrabber.
+An open-source pitch detection tool inspired by NoteGrabber, aiming for a Melodyne-like visual timeline of detected notes (piano-roll style) for offline analysis and a stable tuner-style realtime view.
 
 Goals
 - Prototype in Python on macOS first (fast iteration), then consider a JUCE/C++ implementation for cross-platform plugin + standalone.
@@ -64,12 +64,19 @@ Options:
 - --tuning 440.0          A4 reference
 
 Offline file analysis
-- python scripts/analyze_file.py path/to/audio.wav --output pitch.csv
+- python scripts/analyze_file.py path/to/audio.wav --output pitch.csv --segments segments.csv --segments-json segments.json --plot-segments
+Outputs:
+- Framewise CSV: time_s, frequency_hz, note, cents, confidence
+- Segments CSV/JSON: start_s, end_s, note, median_cents, mean_confidence
 Options:
 - --samplerate 0          If 0, use file’s native rate (recommended)
 - --hop 1024              Hop size for analysis
+- --frame 2048            Frame size
 - --tuning 440.0          A4 reference
-- --plot                  Show a quick matplotlib plot (optional)
+- --min-seg-dur 0.05      Minimum segment duration (seconds)
+- --gap 0.03              Max gap allowed to stitch same-note frames
+- --plot                  Plot raw f0 vs time
+- --plot-segments         Plot Melodyne-style note blobs
 
 Notes on accuracy / latency
 - Smaller block sizes decrease latency but can reduce accuracy for low notes.
