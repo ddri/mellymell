@@ -107,20 +107,22 @@ def main():
         if args.plot:
             plt.plot(times, freqs, label="f0 (Hz)", alpha=0.5)
         if args.plot_segments and segs:
-            # Draw rectangles per segment at the note's nominal frequency
+            # Draw rectangles per segment at the note's center frequency and color by median cents
+            from mellymell.pitch import note_to_hz
             for s in segs:
+                # Parse note name and octave: note ends with 1 or 2 digits depending on octave
                 name = s.note[:-1]
                 octave = int(s.note[-1])
-                # Compute nominal frequency for the note center
-                # Use hz_to_note inverse approximation via scanning cents=0
-                # We can reuse hz_to_note mapping logic by searching around last seen f0.
-                # For simplicity in the plot, place at the median of framewise freqs inside segment if available
-                mask = (np.asarray(times) >= s.start_s) & (np.asarray(times) <= s.end_s)
-                f_med = float(np.median(np.asarray(freqs)[mask])) if np.any(mask) else None
-                y = f_med if f_med else None
-                if y is None or not np.isfinite(y):
-                    continue
-                plt.hlines(y, s.start_s, s.end_s, colors="tab:orange", linewidth=6, alpha=0.7)
+                y = note_to_hz(name, octave, a4=args.tuning)
+                # Color by median cents deviation
+                cents = abs(s.median_cents)
+                if cents <= 10:
+                    color = "#2ecc71"  # green
+                elif cents <= 30:
+                    color = "#f1c40f"  # yellow
+                else:
+                    color = "#e74c3c"  # red
+                plt.hlines(y, s.start_s, s.end_s, colors=color, linewidth=6, alpha=0.8)
         plt.xlabel("Time (s)")
         plt.ylabel("Frequency (Hz)")
         plt.title("Pitch and segments")
