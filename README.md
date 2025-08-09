@@ -64,10 +64,16 @@ Options:
 - --tuning 440.0          A4 reference
 
 Offline file analysis
-- python scripts/analyze_file.py path/to/audio.wav --output pitch.csv --segments segments.csv --segments-json segments.json --plot-segments
+- python scripts/analyze_file.py path/to/audio.wav \
+    --output pitch.csv \
+    --segments segments.csv \
+    --segments-json segments.json \
+    --plot-segments \
+    --html report.html   # also writes report.png next to it
 Outputs:
 - Framewise CSV: time_s, frequency_hz, note, cents, confidence
 - Segments CSV/JSON: start_s, end_s, note, median_cents, mean_confidence
+- HTML report: embeds PNG Melodyne-style plot and links to CSV/JSON
 Options:
 - --samplerate 0          If 0, use file’s native rate (recommended)
 - --hop 1024              Hop size for analysis
@@ -77,6 +83,8 @@ Options:
 - --gap 0.03              Max gap allowed to stitch same-note frames
 - --plot                  Plot raw f0 vs time
 - --plot-segments         Plot Melodyne-style note blobs
+- --html FILE             Write HTML report (auto-saves PNG next to it)
+- --png FILE              Explicit PNG path (if not using --html)
 
 Notes on accuracy / latency
 - Smaller block sizes decrease latency but can reduce accuracy for low notes.

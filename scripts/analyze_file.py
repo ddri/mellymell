@@ -26,6 +26,8 @@ def parse_args():
     ap.add_argument("--segments", type=Path, default=None, help="Write note segments CSV here")
     ap.add_argument("--segments-json", type=Path, default=None, help="Write note segments JSON here")
     ap.add_argument("--plot-segments", action="store_true", help="Plot Melodyne-style note blobs")
+    ap.add_argument("--html", type=Path, default=None, help="Write a simple HTML report (embeds PNG plot)")
+    ap.add_argument("--png", type=Path, default=None, help="Optional PNG path for plot (defaults next to HTML)")
     ap.add_argument("--min-seg-dur", type=float, default=0.05, help="Minimum segment duration (s)")
     ap.add_argument("--gap", type=float, default=0.03, help="Max gap between frames to stitch (s)")
     return ap.parse_args()
@@ -100,21 +102,20 @@ def main():
         args.segments_json.write_text(json.dumps(payload, indent=2))
         print(f"Wrote segments JSON: {args.segments_json}")
 
-    if args.plot or args.plot_segments:
+    if args.plot or args.plot_segments or args.html is not None or args.png is not None:
         import matplotlib.pyplot as plt
+        from mellymell.pitch import note_to_hz
 
-        plt.figure(figsize=(12, 5))
+        fig = plt.figure(figsize=(12, 5))
+        ax = plt.gca()
         if args.plot:
-            plt.plot(times, freqs, label="f0 (Hz)", alpha=0.5)
-        if args.plot_segments and segs:
+            ax.plot(times, freqs, label="f0 (Hz)", alpha=0.5)
+        if (args.plot_segments or args.html is not None or args.png is not None) and segs:
             # Draw rectangles per segment at the note's center frequency and color by median cents
-            from mellymell.pitch import note_to_hz
             for s in segs:
-                # Parse note name and octave: note ends with 1 or 2 digits depending on octave
                 name = s.note[:-1]
                 octave = int(s.note[-1])
                 y = note_to_hz(name, octave, a4=args.tuning)
-                # Color by median cents deviation
                 cents = abs(s.median_cents)
                 if cents <= 10:
                     color = "#2ecc71"  # green
@@ -122,13 +123,50 @@ def main():
                     color = "#f1c40f"  # yellow
                 else:
                     color = "#e74c3c"  # red
-                plt.hlines(y, s.start_s, s.end_s, colors=color, linewidth=6, alpha=0.8)
-        plt.xlabel("Time (s)")
-        plt.ylabel("Frequency (Hz)")
-        plt.title("Pitch and segments")
-        plt.grid(True, alpha=0.3)
-        plt.tight_layout()
-        plt.show()
+                ax.hlines(y, s.start_s, s.end_s, colors=color, linewidth=6, alpha=0.8)
+        ax.set_xlabel("Time (s)")
+        ax.set_ylabel("Frequency (Hz)")
+        ax.set_title("Pitch and segments")
+        ax.grid(True, alpha=0.3)
+        fig.tight_layout()
+
+        png_path = None
+        if args.png is not None:
+            png_path = args.png
+        elif args.html is not None:
+            png_path = args.html.with_suffix(".png")
+
+        if png_path is not None:
+            fig.savefig(png_path, dpi=150)
+            print(f"Wrote plot PNG: {png_path}")
+
+        if args.html is not None:
+            # Build minimal HTML embedding the PNG and linking to CSV/JSON
+            rel_img = png_path.name if png_path is not None else ""
+            frame_csv = args.output.name if hasattr(args.output, "name") else str(args.output)
+            seg_csv = args.segments.name if args.segments is not None else None
+            seg_json = args.segments_json.name if args.segments_json is not None else None
+            html = [
+                "<!DOCTYPE html>",
+                "<meta charset='utf-8'>",
+                "<title>mellymell analysis report</title>",
+                "<style>body{font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:24px;} .meta{color:#666} .links a{margin-right:12px}</style>",
+                "<h1>mellymell analysis</h1>",
+                f"<p class='meta'>Audio: {args.audio} | A4={args.tuning} Hz | hop={args.hop} | frame={args.frame}</p>",
+            ]
+            if rel_img:
+                html.append(f"<img alt='Pitch segments' src='{rel_img}' style='max-width:100%;height:auto;border:1px solid #ddd' />")
+            links = [f"<a href='{frame_csv}'>framewise CSV</a>"]
+            if seg_csv:
+                links.append(f"<a href='{seg_csv}'>segments CSV</a>")
+            if seg_json:
+                links.append(f"<a href='{seg_json}'>segments JSON</a>")
+            html.append(f"<p class='links'>{' | '.join(links)}</p>")
+            args.html.write_text("\n".join(html))
+            print(f"Wrote HTML report: {args.html}")
+
+        if args.plot and args.html is None and args.png is None:
+            plt.show()
 
 
 if __name__ == "__main__":
