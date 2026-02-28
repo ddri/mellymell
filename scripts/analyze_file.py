@@ -3,13 +3,23 @@ from __future__ import annotations
 
 import argparse
 import csv
+import html
+import sys
 from pathlib import Path
 
 import numpy as np
 import librosa
 
-from mellymell.pitch import detect_pitch, hz_to_note
+from mellymell.pitch import detect_pitch, hz_to_note, note_to_hz
 from mellymell.segment import segment_notes, NoteSegment
+
+
+def parse_note_string(note_str: str) -> tuple[str, int]:
+    """Parse a note string like 'A4' or 'C#3' into (name, octave)."""
+    for i in range(len(note_str) - 1, 0, -1):
+        if not note_str[i].lstrip('-').isdigit():
+            return note_str[:i + 1], int(note_str[i + 1:])
+    raise ValueError(f"Cannot parse note string: {note_str!r}")
 
 
 def parse_args():
@@ -35,6 +45,15 @@ def parse_args():
 
 def main():
     args = parse_args()
+    if args.hop <= 0:
+        print(f"Error: --hop must be positive, got {args.hop}", file=sys.stderr)
+        sys.exit(1)
+    if args.fmin <= 0 or args.fmin >= args.fmax:
+        print(f"Error: --fmin must be positive and less than --fmax", file=sys.stderr)
+        sys.exit(1)
+    if not args.audio.exists():
+        print(f"Error: file not found: {args.audio}", file=sys.stderr)
+        sys.exit(1)
     y, sr = librosa.load(str(args.audio), sr=(None if args.samplerate == 0 else args.samplerate), mono=True)
     n = len(y)
     hop = args.hop
@@ -104,7 +123,6 @@ def main():
 
     if args.plot or args.plot_segments or args.html is not None or args.png is not None:
         import matplotlib.pyplot as plt
-        from mellymell.pitch import note_to_hz
 
         fig = plt.figure(figsize=(12, 5))
         ax = plt.gca()
@@ -113,8 +131,7 @@ def main():
         if (args.plot_segments or args.html is not None or args.png is not None) and segs:
             # Draw rectangles per segment at the note's center frequency and color by median cents
             for s in segs:
-                name = s.note[:-1]
-                octave = int(s.note[-1])
+                name, octave = parse_note_string(s.note)
                 y = note_to_hz(name, octave, a4=args.tuning)
                 cents = abs(s.median_cents)
                 if cents <= 10:
@@ -146,23 +163,28 @@ def main():
             frame_csv = args.output.name if hasattr(args.output, "name") else str(args.output)
             seg_csv = args.segments.name if args.segments is not None else None
             seg_json = args.segments_json.name if args.segments_json is not None else None
-            html = [
+            esc_audio = html.escape(str(args.audio))
+            esc_img = html.escape(str(rel_img)) if rel_img else ""
+            esc_frame_csv = html.escape(str(frame_csv))
+            esc_seg_csv = html.escape(str(seg_csv)) if seg_csv else None
+            esc_seg_json = html.escape(str(seg_json)) if seg_json else None
+            html_lines = [
                 "<!DOCTYPE html>",
                 "<meta charset='utf-8'>",
                 "<title>mellymell analysis report</title>",
                 "<style>body{font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:24px;} .meta{color:#666} .links a{margin-right:12px}</style>",
                 "<h1>mellymell analysis</h1>",
-                f"<p class='meta'>Audio: {args.audio} | A4={args.tuning} Hz | hop={args.hop} | frame={args.frame}</p>",
+                f"<p class='meta'>Audio: {esc_audio} | A4={args.tuning} Hz | hop={args.hop} | frame={args.frame}</p>",
             ]
-            if rel_img:
-                html.append(f"<img alt='Pitch segments' src='{rel_img}' style='max-width:100%;height:auto;border:1px solid #ddd' />")
-            links = [f"<a href='{frame_csv}'>framewise CSV</a>"]
-            if seg_csv:
-                links.append(f"<a href='{seg_csv}'>segments CSV</a>")
-            if seg_json:
-                links.append(f"<a href='{seg_json}'>segments JSON</a>")
-            html.append(f"<p class='links'>{' | '.join(links)}</p>")
-            args.html.write_text("\n".join(html))
+            if esc_img:
+                html_lines.append(f"<img alt='Pitch segments' src='{esc_img}' style='max-width:100%;height:auto;border:1px solid #ddd' />")
+            links = [f"<a href='{esc_frame_csv}'>framewise CSV</a>"]
+            if esc_seg_csv:
+                links.append(f"<a href='{esc_seg_csv}'>segments CSV</a>")
+            if esc_seg_json:
+                links.append(f"<a href='{esc_seg_json}'>segments JSON</a>")
+            html_lines.append(f"<p class='links'>{' | '.join(links)}</p>")
+            args.html.write_text("\n".join(html_lines))
             print(f"Wrote HTML report: {args.html}")
 
         if args.plot and args.html is None and args.png is None:

@@ -11,7 +11,15 @@ from typing import Deque, Optional
 import numpy as np
 import sounddevice as sd
 
-from mellymell.pitch import detect_pitch, hz_to_note
+from mellymell.pitch import detect_pitch, hz_to_note, note_to_hz
+
+
+def parse_note_string(note_str: str) -> tuple[str, int]:
+    """Parse a note string like 'A4' or 'C#3' into (name, octave)."""
+    for i in range(len(note_str) - 1, 0, -1):
+        if not note_str[i].lstrip('-').isdigit():
+            return note_str[:i + 1], int(note_str[i + 1:])
+    raise ValueError(f"Cannot parse note string: {note_str!r}")
 
 
 def parse_args():
@@ -26,6 +34,8 @@ def parse_args():
     ap.add_argument("--conf", type=float, default=0.2, help="Confidence threshold")
     ap.add_argument("--median", type=int, default=5, help="Median window (frames)")
     ap.add_argument("--hysteresis", type=float, default=10.0, help="Note change hysteresis in cents")
+    ap.add_argument("--method", type=str, default="yin", choices=["yin", "mpm"], 
+                   help="Pitch detection algorithm (yin or mpm)")
     ap.add_argument("--plot", action="store_true", help="Show a live frequency plot (matplotlib)")
     return ap.parse_args()
 
@@ -78,13 +88,13 @@ def main():
         ax.set_xlim(0, 200)
         plot_data: Deque[float] = collections.deque(maxlen=200)
 
-    print("Press Ctrl+C to stop")
+    print(f"Using {args.method.upper()} algorithm - Press Ctrl+C to stop")
     try:
         with stream:
             while True:
                 block = q.get()
                 block = block.squeeze(-1).astype(np.float32)
-                res = detect_pitch(block, args.samplerate, fmin=args.fmin, fmax=args.fmax)
+                res = detect_pitch(block, args.samplerate, fmin=args.fmin, fmax=args.fmax, method=args.method)
                 f = float(res.frequency)
                 conf = float(res.confidence)
 
@@ -104,14 +114,15 @@ def main():
                 freq_hist.append(f)
                 f_med = float(np.median(freq_hist)) if len(freq_hist) > 0 else f
                 name, octave, cents = hz_to_note(f_med, a4=args.tuning)
-                cur_note = f"{name}{octave:02d}"
+                cur_note = f"{name}{octave}"
 
                 # Hysteresis on note change: if changing note, require cents to exceed threshold
                 if shown_note is not None and cur_note != shown_note:
                     # compute cents of f_med relative to the previous shown note center
-                    prev_name = shown_note[:-2]
-                    prev_octave = int(shown_note[-2:])
-                    from mellymell.pitch import note_to_hz, hz_to_midi
+                    try:
+                        prev_name, prev_octave = parse_note_string(shown_note)
+                    except ValueError:
+                        prev_name, prev_octave = name, octave
                     f_prev = note_to_hz(prev_name, prev_octave, a4=args.tuning)
                     # cents delta between f_med and previous center
                     cents_delta = 1200.0 * np.log2(f_med / f_prev)
