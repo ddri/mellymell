@@ -150,15 +150,7 @@ def mpm(frame: np.ndarray, sr: int, fmin: float = 50.0, fmax: float = 2000.0,
     for tau in range(max_tau + 1):
         if tau < N:
             r[tau] = np.dot(x[:N-tau], x[tau:])
-    
-    # Compute squared difference function d(tau) 
-    # d(tau) = sum((x[i] - x[i+tau])^2) for i in range(N-tau)
-    # Using identity: d(tau) = 2*(r[0] - r[tau])
-    d = np.zeros(max_tau + 1)
-    for tau in range(max_tau + 1):
-        if tau < N:
-            d[tau] = 2 * (r[0] - r[tau])
-    
+
     # Compute normalized squared difference function (NSDF)
     # NSDF(tau) = 2*r(tau) / (r[0] + r[tau])
     nsdf = np.zeros(max_tau + 1)
@@ -187,11 +179,8 @@ def mpm(frame: np.ndarray, sr: int, fmin: float = 50.0, fmax: float = 2000.0,
     # Apply threshold: select first peak above threshold * max_peak
     selected_peak = None
     threshold_value = threshold * max_peak_value
-    
-    # Sort peaks by tau value to ensure we select the lowest frequency first
-    peaks_sorted = sorted(peaks, key=lambda p: p[0])
-    
-    for tau, peak_value in peaks_sorted:
+
+    for tau, peak_value in peaks:
         if peak_value >= threshold_value:
             selected_peak = (tau, peak_value)
             break
@@ -214,11 +203,7 @@ def mpm(frame: np.ndarray, sr: int, fmin: float = 50.0, fmax: float = 2000.0,
             tau_estimate = tau_estimate + (c - a) / denom
             
             # Recalculate clarity at interpolated position
-            # Linear interpolation of clarity between neighboring points
-            if c > a:
-                clarity = b + 0.25 * (c - a) * (c - a) / (2 * b - a - c)
-            else:
-                clarity = b + 0.25 * (a - c) * (a - c) / (2 * b - a - c)
+            clarity = b + 0.25 * (c - a) ** 2 / (2 * b - a - c)
     
     # Convert tau to frequency
     if tau_estimate > 0:

@@ -32,6 +32,7 @@ def parse_args():
     ap.add_argument("--tuning", type=float, default=440.0, help="A4 tuning Hz")
     ap.add_argument("--fmin", type=float, default=50.0)
     ap.add_argument("--fmax", type=float, default=2000.0)
+    ap.add_argument("--method", choices=["yin", "mpm"], default="yin", help="Pitch detection algorithm")
     ap.add_argument("--plot", action="store_true", help="Plot pitch over time (requires matplotlib)")
     ap.add_argument("--segments", type=Path, default=None, help="Write note segments CSV here")
     ap.add_argument("--segments-json", type=Path, default=None, help="Write note segments JSON here")
@@ -68,7 +69,7 @@ def main():
     for start in range(0, n - frame, hop):
         end = start + frame
         buf = y[start:end]
-        res = detect_pitch(buf, sr, fmin=args.fmin, fmax=args.fmax)
+        res = detect_pitch(buf, sr, fmin=args.fmin, fmax=args.fmax, method=args.method)
         f = float(res.frequency)
         c = float(res.confidence)
         times.append(start / sr)

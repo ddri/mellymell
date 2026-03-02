@@ -54,7 +54,6 @@ class TunerGUI:
         self.running = False
         
         self.setup_ui()
-        self.setup_audio()
         
     def setup_ui(self):
         """Create the GUI layout."""
@@ -262,11 +261,15 @@ class TunerGUI:
     
     def setup_audio(self):
         """Setup audio processing."""
+        if self.stream is not None:
+            self.stream.close()
+            self.stream = None
+
         def audio_callback(indata, frames, time_info, status):
             if status:
                 print(f"Audio status: {status}")
             self.audio_queue.put(indata.copy().reshape(frames, -1))
-        
+
         try:
             device_str = self.device_var.get()
             device_id = int(device_str.split(':')[0]) if device_str else None

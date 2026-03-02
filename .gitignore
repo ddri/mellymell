@@ -8,6 +8,15 @@ __pycache__/
 # macOS
 .DS_Store
 
+# Build artifacts
+*.egg-info/
+*.egg
+dist/
+build/
+
+# Test cache
+.pytest_cache/
+
 # Editors
 .vscode/
 .idea/
