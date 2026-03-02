@@ -16,6 +16,7 @@ import numpy as np
 import sounddevice as sd
 
 from mellymell.pitch import detect_pitch, hz_to_note, note_to_hz
+from mellymell.backends import available_realtime_methods
 
 
 def parse_note_string(note_str: str) -> tuple[str, int]:
@@ -44,7 +45,8 @@ class TunerGUI:
         self.median_window = 5
         self.hysteresis = 10.0
         self.method = "yin"  # Default algorithm
-        
+        self._pesto_processor = None  # Created on-demand for PESTO streaming
+
         # Audio processing state
         self.audio_queue: queue.Queue[np.ndarray] = queue.Queue()
         self.stream: Optional[sd.InputStream] = None
@@ -174,10 +176,11 @@ class TunerGUI:
         algo_frame.pack(anchor="w", padx=5, pady=2)
         tk.Label(algo_frame, text="Algorithm:", fg="#ccc", bg="#2b2b2b", width=12, anchor="w").pack(side="left")
         self.method_var = tk.StringVar(value=self.method)
+        rt_methods = sorted(m for m, ok in available_realtime_methods().items() if ok)
         method_combo = ttk.Combobox(
             algo_frame,
             textvariable=self.method_var,
-            values=["yin", "mpm"],
+            values=rt_methods,
             state="readonly",
             width=8
         )
@@ -300,7 +303,13 @@ class TunerGUI:
             self.method = self.method_var.get()
         except ValueError:
             pass  # Keep current values if invalid
-        
+
+        # Create PESTO stream processor if needed
+        self._pesto_processor = None
+        if self.method == "pesto":
+            from mellymell.backends import PestoStreamProcessor
+            self._pesto_processor = PestoStreamProcessor(sr=self.samplerate)
+
         # Setup audio stream
         self.setup_audio()
         
@@ -339,7 +348,10 @@ class TunerGUI:
                 block = block.squeeze(-1).astype(np.float32)
                 
                 # Detect pitch
-                res = detect_pitch(block, self.samplerate, fmin=self.fmin, fmax=self.fmax, method=self.method)
+                if self._pesto_processor is not None:
+                    res = self._pesto_processor.process_frame(block)
+                else:
+                    res = detect_pitch(block, self.samplerate, fmin=self.fmin, fmax=self.fmax, method=self.method)
                 f = float(res.frequency)
                 conf = float(res.confidence)
                 

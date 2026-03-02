@@ -19,6 +19,13 @@ source .venv/bin/activate
 brew install portaudio  # Required for sounddevice (macOS)
 pip install -U pip
 pip install -e .[dev]
+
+# Optional ML backends
+pip install -e .[ml]          # CREPE + PESTO (requires PyTorch)
+pip install -e .[crepe]       # CREPE only
+pip install -e .[pesto]       # PESTO only
+pip install -e .[polyphonic]  # Basic Pitch (polyphonic detection)
+pip install -e .[all]         # Everything
 ```
 
 ### Running Tests
@@ -54,6 +61,9 @@ python scripts/tuner_gui.py                     # Algorithm selectable in settin
 **Offline file analysis:**
 ```bash
 python scripts/analyze_file.py path/to/audio.wav --output pitch.csv --segments segments.csv --plot-segments --html report.html
+python scripts/analyze_file.py path/to/audio.wav --method pyin --segments segs.csv --plot-segments
+python scripts/analyze_file.py path/to/audio.wav --method crepe --crepe-model small
+python scripts/analyze_file.py path/to/audio.wav --polyphonic  # Basic Pitch polyphonic detection
 ```
 
 ## Architecture
@@ -71,6 +81,14 @@ python scripts/analyze_file.py path/to/audio.wav --output pitch.csv --segments s
   - `segment_notes()`: Groups framewise pitch detections into note segments
   - `NoteSegment` dataclass: Stores segment timing, note, cents deviation, and confidence
   - Handles gap detection and minimum segment duration filtering
+
+- **`src/mellymell/backends.py`**: ML and bulk pitch detection backends
+  - `detect_pitch_bulk()`: Run any method (yin, mpm, pyin, crepe, pesto) on a full audio buffer
+  - `detect_pitch_polyphonic()`: Basic Pitch wrapper for polyphonic note detection
+  - `available_methods()` / `available_realtime_methods()`: Probe installed backends
+  - `PestoStreamProcessor`: Stateful PESTO wrapper for realtime streaming
+  - `BulkPitchResult`, `NoteEvent`, `PolyphonicResult` dataclasses
+  - Optional deps (torch, torchcrepe, pesto-pitch, basic-pitch) gated with lazy imports
 
 ### Key Data Flow
 
@@ -109,6 +127,7 @@ The architecture follows a modular pipeline design:
 - **DSP**: numpy, scipy
 - **Visualization**: matplotlib
 - **Testing**: pytest
+- **Optional ML**: torch, torchcrepe (CREPE), pesto-pitch (PESTO), basic-pitch (polyphonic)
 
 ## CI/Testing
 
@@ -116,6 +135,7 @@ The project uses GitHub Actions with macOS runners (matching the primary develop
 
 ### Test Structure
 - **`tests/test_pitch.py`**: Core algorithm validation with synthetic tones
+- **`tests/test_backends.py`**: Bulk API and ML backend tests (ML tests skip gracefully if deps missing)
 - **`tests/test_benchmarks.py`**: Performance and accuracy benchmark tests
 
 ### Quality Assurance

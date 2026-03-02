@@ -10,8 +10,14 @@ from pathlib import Path
 import numpy as np
 import librosa
 
-from mellymell.pitch import detect_pitch, hz_to_note, note_to_hz
+from mellymell.pitch import hz_to_note, note_to_hz
 from mellymell.segment import segment_notes, NoteSegment
+from mellymell.backends import (
+    available_methods,
+    detect_pitch_bulk,
+    detect_pitch_polyphonic,
+    BULK_METHODS,
+)
 
 
 def parse_note_string(note_str: str) -> tuple[str, int]:
@@ -23,6 +29,9 @@ def parse_note_string(note_str: str) -> tuple[str, int]:
 
 
 def parse_args():
+    methods = available_methods()
+    installed_bulk = [m for m in sorted(BULK_METHODS) if methods.get(m, False)]
+
     ap = argparse.ArgumentParser(description="Offline file pitch analysis")
     ap.add_argument("audio", type=Path, help="Path to audio file")
     ap.add_argument("--output", type=Path, default=Path("pitch.csv"), help="CSV output path")
@@ -32,7 +41,17 @@ def parse_args():
     ap.add_argument("--tuning", type=float, default=440.0, help="A4 tuning Hz")
     ap.add_argument("--fmin", type=float, default=50.0)
     ap.add_argument("--fmax", type=float, default=2000.0)
-    ap.add_argument("--method", choices=["yin", "mpm"], default="yin", help="Pitch detection algorithm")
+    ap.add_argument(
+        "--method",
+        choices=installed_bulk,
+        default="yin",
+        help=f"Pitch detection algorithm (installed: {', '.join(installed_bulk)})",
+    )
+    ap.add_argument("--polyphonic", action="store_true",
+                    help="Use Basic Pitch polyphonic detection instead of monophonic")
+    ap.add_argument("--crepe-model", default="tiny",
+                    choices=["tiny", "small", "medium", "large", "full"],
+                    help="CREPE model capacity (only used with --method crepe)")
     ap.add_argument("--plot", action="store_true", help="Plot pitch over time (requires matplotlib)")
     ap.add_argument("--segments", type=Path, default=None, help="Write note segments CSV here")
     ap.add_argument("--segments-json", type=Path, default=None, help="Write note segments JSON here")
@@ -55,53 +74,93 @@ def main():
     if not args.audio.exists():
         print(f"Error: file not found: {args.audio}", file=sys.stderr)
         sys.exit(1)
-    y, sr = librosa.load(str(args.audio), sr=(None if args.samplerate == 0 else args.samplerate), mono=True)
-    n = len(y)
-    hop = args.hop
-    frame = args.frame
 
-    times = []
-    freqs = []
-    notes = []
-    cents_list = []
-    confs = []
+    # ── Polyphonic branch ──────────────────────────────────────────────
+    if args.polyphonic:
+        print(f"Running Basic Pitch polyphonic detection on {args.audio}...")
+        poly_result = detect_pitch_polyphonic(str(args.audio))
+        events = poly_result.note_events
+        print(f"Detected {len(events)} note events")
 
-    for start in range(0, n - frame, hop):
-        end = start + frame
-        buf = y[start:end]
-        res = detect_pitch(buf, sr, fmin=args.fmin, fmax=args.fmax, method=args.method)
-        f = float(res.frequency)
-        c = float(res.confidence)
-        times.append(start / sr)
-        freqs.append(f)
-        confs.append(c)
-        if f > 0:
-            name, octave, cents = hz_to_note(f, a4=args.tuning)
-            notes.append(f"{name}{octave}")
-            cents_list.append(cents)
-        else:
-            notes.append("")
-            cents_list.append(0.0)
+        # Convert NoteEvents to NoteSegments for reuse of existing output code
+        segs = [
+            NoteSegment(
+                start_s=e.start_s,
+                end_s=e.end_s,
+                note=e.note,
+                median_cents=0.0,  # polyphonic doesn't provide cents
+                mean_confidence=e.amplitude,
+            )
+            for e in events
+        ]
 
-    # Write CSV
-    with open(args.output, "w", newline="") as f:
-        w = csv.writer(f)
-        w.writerow(["time_s", "frequency_hz", "note", "cents", "confidence"])  # header
-        for t, f0, note, cents, conf in zip(times, freqs, notes, cents_list, confs):
-            w.writerow([f"{t:.6f}", f"{f0:.3f}", note, f"{cents:.1f}", f"{conf:.3f}"])
+        # Write a simplified framewise CSV (one row per event)
+        with open(args.output, "w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["start_s", "end_s", "note", "midi_pitch", "amplitude"])
+            for e in events:
+                w.writerow([
+                    f"{e.start_s:.6f}", f"{e.end_s:.6f}",
+                    e.note, e.midi_pitch, f"{e.amplitude:.3f}",
+                ])
+        print(f"Wrote {args.output} ({len(events)} events)")
 
-    print(f"Wrote {args.output} ({len(times)} frames)")
+        # Fall through to shared segment output / plotting below
+        # Build dummy framewise arrays for compatibility (not needed for segments)
+        times = np.array([])
+        freqs = np.array([])
 
-    # Segment notes
-    segs = segment_notes(
-        np.asarray(times), np.asarray(freqs), np.asarray(confs), a4=args.tuning,
-        min_seg_dur=args.min_seg_dur, gap=args.gap
-    )
+    # ── Monophonic branch (bulk API) ───────────────────────────────────
+    else:
+        y, sr = librosa.load(str(args.audio), sr=(None if args.samplerate == 0 else args.samplerate), mono=True)
 
+        print(f"Running {args.method.upper()} on {args.audio} ({len(y)/sr:.2f}s, sr={sr})...")
+        bulk = detect_pitch_bulk(
+            y, sr,
+            method=args.method,
+            fmin=args.fmin,
+            fmax=args.fmax,
+            hop=args.hop,
+            frame_size=args.frame,
+            crepe_model=args.crepe_model,
+        )
+
+        times = bulk.times
+        freqs = bulk.frequencies
+        confs = bulk.confidences
+
+        # Compute note names / cents for CSV
+        notes = []
+        cents_list = []
+        for f in freqs:
+            if f > 0:
+                name, octave, cents = hz_to_note(f, a4=args.tuning)
+                notes.append(f"{name}{octave}")
+                cents_list.append(cents)
+            else:
+                notes.append("")
+                cents_list.append(0.0)
+
+        # Write framewise CSV
+        with open(args.output, "w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["time_s", "frequency_hz", "note", "cents", "confidence"])
+            for t, f0, note, cents, conf in zip(times, freqs, notes, cents_list, confs):
+                w.writerow([f"{t:.6f}", f"{f0:.3f}", note, f"{cents:.1f}", f"{conf:.3f}"])
+
+        print(f"Wrote {args.output} ({len(times)} frames)")
+
+        # Segment notes
+        segs = segment_notes(
+            times, freqs, confs, a4=args.tuning,
+            min_seg_dur=args.min_seg_dur, gap=args.gap,
+        )
+
+    # ── Shared output: segments CSV/JSON and plotting ──────────────────
     if args.segments is not None:
         with open(args.segments, "w", newline="") as f:
             w = csv.writer(f)
-            w.writerow(["start_s", "end_s", "note", "median_cents", "mean_confidence"])  # header
+            w.writerow(["start_s", "end_s", "note", "median_cents", "mean_confidence"])
             for s in segs:
                 w.writerow([f"{s.start_s:.6f}", f"{s.end_s:.6f}", s.note, f"{s.median_cents:.1f}", f"{s.mean_confidence:.3f}"])
         print(f"Wrote segments CSV: {args.segments} ({len(segs)} segments)")
@@ -127,7 +186,7 @@ def main():
 
         fig = plt.figure(figsize=(12, 5))
         ax = plt.gca()
-        if args.plot:
+        if args.plot and len(times) > 0:
             ax.plot(times, freqs, label="f0 (Hz)", alpha=0.5)
         if (args.plot_segments or args.html is not None or args.png is not None) and segs:
             # Draw rectangles per segment at the note's center frequency and color by median cents
@@ -175,7 +234,7 @@ def main():
                 "<title>mellymell analysis report</title>",
                 "<style>body{font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:24px;} .meta{color:#666} .links a{margin-right:12px}</style>",
                 "<h1>mellymell analysis</h1>",
-                f"<p class='meta'>Audio: {esc_audio} | A4={args.tuning} Hz | hop={args.hop} | frame={args.frame}</p>",
+                f"<p class='meta'>Audio: {esc_audio} | A4={args.tuning} Hz | hop={args.hop} | frame={args.frame} | method={args.method}</p>",
             ]
             if esc_img:
                 html_lines.append(f"<img alt='Pitch segments' src='{esc_img}' style='max-width:100%;height:auto;border:1px solid #ddd' />")
@@ -194,4 +253,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

@@ -10,6 +10,12 @@ __all__ = [
     "PitchResult",
     "segment_notes",
     "NoteSegment",
+    "detect_pitch_bulk",
+    "detect_pitch_polyphonic",
+    "available_methods",
+    "BulkPitchResult",
+    "NoteEvent",
+    "PolyphonicResult",
 ]
 
 from .pitch import (
@@ -24,3 +30,11 @@ from .pitch import (
     PitchResult,
 )
 from .segment import segment_notes, NoteSegment
+from .backends import (
+    detect_pitch_bulk,
+    detect_pitch_polyphonic,
+    available_methods,
+    BulkPitchResult,
+    NoteEvent,
+    PolyphonicResult,
+)

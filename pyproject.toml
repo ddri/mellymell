@@ -23,6 +23,25 @@ dependencies = [
 dev = [
   "pytest>=7.4",
 ]
+ml = [
+  "torch>=2.0",
+  "torchcrepe>=0.0.20",
+  "pesto-pitch>=0.1.0",
+]
+crepe = [
+  "torch>=2.0",
+  "torchcrepe>=0.0.20",
+]
+pesto = [
+  "torch>=2.0",
+  "pesto-pitch>=0.1.0",
+]
+polyphonic = [
+  "basic-pitch>=0.3.0",
+]
+all = [
+  "mellymell[ml,polyphonic,dev]",
+]
 
 [project.urls]
 Homepage = "https://github.com/ddri/mellymell"

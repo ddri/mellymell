@@ -12,6 +12,7 @@ import numpy as np
 import sounddevice as sd
 
 from mellymell.pitch import detect_pitch, hz_to_note, note_to_hz
+from mellymell.backends import available_realtime_methods
 
 
 def parse_note_string(note_str: str) -> tuple[str, int]:
@@ -34,8 +35,9 @@ def parse_args():
     ap.add_argument("--conf", type=float, default=0.2, help="Confidence threshold")
     ap.add_argument("--median", type=int, default=5, help="Median window (frames)")
     ap.add_argument("--hysteresis", type=float, default=10.0, help="Note change hysteresis in cents")
-    ap.add_argument("--method", type=str, default="yin", choices=["yin", "mpm"], 
-                   help="Pitch detection algorithm (yin or mpm)")
+    rt_methods = sorted(m for m, ok in available_realtime_methods().items() if ok)
+    ap.add_argument("--method", type=str, default="yin", choices=rt_methods,
+                   help=f"Pitch detection algorithm (installed: {', '.join(rt_methods)})")
     ap.add_argument("--plot", action="store_true", help="Show a live frequency plot (matplotlib)")
     return ap.parse_args()
 
@@ -88,13 +90,22 @@ def main():
         ax.set_xlim(0, 200)
         plot_data: Deque[float] = collections.deque(maxlen=200)
 
+    # Create PESTO stream processor if needed
+    pesto_processor = None
+    if args.method == "pesto":
+        from mellymell.backends import PestoStreamProcessor
+        pesto_processor = PestoStreamProcessor(sr=args.samplerate)
+
     print(f"Using {args.method.upper()} algorithm - Press Ctrl+C to stop")
     try:
         with stream:
             while True:
                 block = q.get()
                 block = block.squeeze(-1).astype(np.float32)
-                res = detect_pitch(block, args.samplerate, fmin=args.fmin, fmax=args.fmax, method=args.method)
+                if pesto_processor is not None:
+                    res = pesto_processor.process_frame(block)
+                else:
+                    res = detect_pitch(block, args.samplerate, fmin=args.fmin, fmax=args.fmax, method=args.method)
                 f = float(res.frequency)
                 conf = float(res.confidence)
 
